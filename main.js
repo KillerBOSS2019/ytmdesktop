@@ -8,6 +8,7 @@ const {
     Menu,
     ipcMain,
     systemPreferences,
+    Session,
     nativeTheme,
     screen,
     shell,
@@ -19,6 +20,21 @@ const ClipboardWatcher = require('electron-clipboard-watcher')
 const electronLocalshortcut = require('electron-localshortcut')
 const electronLog = require('electron-log')
 const os = require('os')
+
+// Adblock
+const {
+    ElectronBlocker,
+    fullLists,
+    Request,
+} = require('@cliqz/adblocker-electron')
+const fetch = require('node-fetch')
+
+// Autoconfirm (non-stop)
+const fs = require('fs')
+const autoConfirm = fs.readFileSync(
+    path.join(__dirname, 'src', 'utils', 'nonstop', 'autoconfirm.js'),
+    'utf8'
+)
 
 const { calcYTViewSize } = require('./src/utils/calcYTViewSize')
 const { isWindows, isMac, isLinux } = require('./src/utils/systemInfo')
@@ -139,7 +155,7 @@ if (settingsProvider.get('settings-disable-hardware-acceleration')) {
 }
 
 /* Functions ============================================================================= */
-function createWindow() {
+async function createWindow() {
     if (isMac() || isWindows()) {
         const execApp = path.basename(process.execPath)
         const startArgs = ['--processStart', `"${execApp}"`]
@@ -219,6 +235,36 @@ function createWindow() {
     }
 
     mainWindow = new BrowserWindow(browserWindowConfig)
+
+    const blocker = await ElectronBlocker.fromLists(fetch, fullLists, {
+        enableCompression: true,
+    })
+
+    blocker.enableBlockingInSession(mainWindow.webContents.session)
+
+    blocker.on('request-blocked', (request) => {
+        console.log('blocked', request.tabId, request.url)
+    })
+
+    blocker.on('request-redirected', (request) => {
+        console.log('redirected', request.tabId, request.url)
+    })
+
+    blocker.on('request-whitelisted', (request) => {
+        console.log('whitelisted', request.tabId, request.url)
+    })
+
+    blocker.on('csp-injected', (request) => {
+        console.log('csp', request.url)
+    })
+
+    blocker.on('script-injected', (script, url) => {
+        console.log('script', script.length, url)
+    })
+
+    blocker.on('style-injected', (style, url) => {
+        console.log('style', style.length, url)
+    })
 
     mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
         {
@@ -336,6 +382,7 @@ function createWindow() {
     view.webContents.on('media-started-playing', function () {
         if (!infoPlayerProvider.hasInitialized()) {
             infoPlayerProvider.init(view)
+            view.webContents.executeJavaScript(autoConfirm)
             if (isLinux()) {
                 mprisProvider.setRealPlayer(infoPlayerProvider) //this lets us keep track of the current time in playback.
             }

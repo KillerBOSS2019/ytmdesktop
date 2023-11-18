@@ -5,6 +5,7 @@ const networkInterfaces = os.networkInterfaces()
 const qrcode = require('qrcode-generator')
 const infoPlayerProvider = require('../providers/infoPlayerProvider')
 const settingsProvider = require('../providers/settingsProvider')
+const portUsed = require('port-used');
 
 const ip = '0.0.0.0'
 const port = 9863
@@ -314,57 +315,65 @@ function canConnect(socket) {
     return true
 }
 
-function start() {
+async function start() {
     try {
-        server.listen(port, ip)
-        const io = require('socket.io')(server)
 
-        timerTotalConections = setInterval(() => {
-            totalConnections = Object.keys(io.sockets.sockets).length
+        await portUsed.check(port, ip)
+        .then((inUse) => {
+            if (inUse) return false
 
-            if (totalConnections) {
-                io.emit('tick', infoPlayerProvider.getAllInfo())
-            }
-        }, 500)
+            server.listen(port, ip)
+            const io = require('socket.io')(server)
 
-        io.on('connection', (socket) => {
-            if (!canConnect(socket)) {
-                socket.disconnect()
-            }
+            timerTotalConections = setInterval(() => {
+                totalConnections = Object.keys(io.sockets.sockets).length
 
-            socket.on('media-commands', (cmd, value) => execCmd(cmd, value))
+                if (totalConnections) {
+                    io.emit('tick', infoPlayerProvider.getAllInfo())
+                }
+            }, 500)
 
-            socket.on('retrieve-info', () =>
-                socket.emit('info', { app: infoApp(), server: infoServer() })
-            )
+            io.on('connection', (socket) => {
+                if (!canConnect(socket)) {
+                    socket.disconnect()
+                }
 
-            socket.on('query-player', () =>
-                socket.emit('player', infoPlayerProvider.getPlayerInfo())
-            )
+                socket.on('media-commands', (cmd, value) => execCmd(cmd, value))
 
-            socket.on('query-track', () =>
-                socket.emit('track', infoPlayerProvider.getTrackInfo())
-            )
+                socket.on('retrieve-info', () =>
+                    socket.emit('info', { app: infoApp(), server: infoServer() })
+                )
 
-            socket.on('query-queue', () =>
-                socket.emit('queue', infoPlayerProvider.getQueueInfo())
-            )
+                socket.on('query-player', () =>
+                    socket.emit('player', infoPlayerProvider.getPlayerInfo())
+                )
 
-            socket.on('query-playlist', () =>
-                socket.emit('playlist', infoPlayerProvider.getPlaylistInfo())
-            )
+                socket.on('query-track', () =>
+                    socket.emit('track', infoPlayerProvider.getTrackInfo())
+                )
 
-            socket.on('query-lyrics', () =>
-                socket.emit('lyrics', infoPlayerProvider.getLyricsInfo())
-            )
-        })
+                socket.on('query-queue', () =>
+                    socket.emit('queue', infoPlayerProvider.getQueueInfo())
+                )
 
-        fetchNetworkInterfaces()
+                socket.on('query-playlist', () =>
+                    socket.emit('playlist', infoPlayerProvider.getPlaylistInfo())
+                )
 
-        ipcMain.emit('log', {
-            type: 'info',
-            data: `Companion Server listening on port ${port}`,
-        })
+                socket.on('query-lyrics', () =>
+                    socket.emit('lyrics', infoPlayerProvider.getLyricsInfo())
+                )
+            })
+
+            fetchNetworkInterfaces()
+
+            ipcMain.emit('log', {
+                type: 'info',
+                data: `Companion Server listening on port ${port}`,
+            })
+        }, (err) => {
+        });
+
     } catch {
         ipcMain.emit('log', {
             type: 'warn',
